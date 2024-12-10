@@ -1,6 +1,16 @@
 import tkinter as tk
 import cv2
 import os
+import pymysql
+
+# Database setup
+def get_db_connection():
+    return pymysql.connect(
+        host='localhost', 
+        user='root', 
+        password='your_password', 
+        database='AttendanceDB'
+    )
 
 # Main window setup
 window = tk.Tk()
@@ -18,21 +28,43 @@ def take_img():
         cam = cv2.VideoCapture(0)
         detector = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
         sampleNum = 0
-        while True:
-            ret, img = cam.read()
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            faces = detector.detectMultiScale(gray, 1.3, 5)
-            for (x, y, w, h) in faces:
-                sampleNum += 1
-                # Save the captured face image
-                cv2.imwrite("TrainingImage/" + name + "." + enrollment + '.' + str(sampleNum) + ".jpg", gray[y:y+h, x:x+w])
-                cv2.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 2)
-            cv2.imshow('Capturing Images', img)
-            if cv2.waitKey(1) & 0xFF == ord('q') or sampleNum >= 1:
-                break
-        cam.release()
-        cv2.destroyAllWindows()
-        Notification.configure(text="Image Captured and Saved for Enrollment: " + enrollment + " Name: " + name, bg="green", fg="white")
+
+        if not os.path.exists("TrainingImage"):
+            os.makedirs("TrainingImage")
+
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        try:
+            while True:
+                ret, img = cam.read()
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                faces = detector.detectMultiScale(gray, 1.3, 5)
+                for (x, y, w, h) in faces:
+                    sampleNum += 1
+                    img_path = f"TrainingImage/{name}.{enrollment}.{sampleNum}.jpg"
+                    cv2.imwrite(img_path, gray[y:y+h, x:x+w])
+                    cv2.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                    
+                    # Insert into database
+                    cursor.execute(
+                        "INSERT INTO attendance (enrollment, name, image_path) VALUES (%s, %s, %s)",
+                        (enrollment, name, img_path)
+                    )
+                    connection.commit()
+
+                cv2.imshow('Capturing Images', img)
+                if cv2.waitKey(1) & 0xFF == ord('q') or sampleNum >= 1:
+                    break
+        except KeyboardInterrupt:
+            # Gracefully close the camera and window if interrupted
+            print("Image capture interrupted!")
+        finally:
+            cam.release()
+            cv2.destroyAllWindows()
+            cursor.close()
+            connection.close()
+            Notification.configure(text=f"Image Captured and Saved for Enrollment: {enrollment} Name: {name}", bg="green", fg="white")
 
 # GUI Elements
 message = tk.Label(window, text="Simple Attendance System", bg="black", fg="white", width=40, height=2, font=('times', 15, 'bold'))
